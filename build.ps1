@@ -1,7 +1,7 @@
-#requires -Version 3
+#requires -Version 5
 
 param(
-	[ValidateSet("vs2012", "vs2013", "vs2015", "vs2017", "nupkg", "nupkg-only")]
+	[ValidateSet("vs2012", "vs2013", "vs2015", "vs2017", "vs2019", "nupkg", "nupkg-only")]
 	[Parameter(Position = 0)]
 	[string] $Target = "nupkg",
 
@@ -14,12 +14,17 @@ param(
 	[string] $CefBinaryDir = "../cefsource/chromium/src/cef/binary_distrib/",
 
 	[Parameter(Position = 3)]
-	$CefVersion = "3.3239.1700.g385b2d4",
+	$CefVersion = "79.1.10+g7ec49fa+chromium-79.0.3945.117",
 
 	[ValidateSet("tar.bz2","zip","7z")]
-	[Parameter()]
+	[Parameter(Position = 4)]
 	[string] $Extension = "tar.bz2",
-	[Switch] $NoDebugBuild
+	
+	[Parameter(Position = 5)]
+	[Switch] $NoDebugBuild,
+	
+	[Parameter(Position = 6)]
+	[string] $Suffix
 )
 
 Set-StrictMode -version latest
@@ -47,7 +52,6 @@ try
 		$CefVersion = ($name -replace "cef_binary_", "") -replace "_windows64.$Extension";
 	}
 
-
 	$Cef = Join-Path $WorkingDir 'cef'
 	$CefInclude = Join-Path $Cef 'include'
 	$Cef32 = Join-Path $WorkingDir 'cef_binary_3.y.z_windows32'
@@ -73,9 +77,23 @@ try
 		$CefVersion = "$env:APPVEYOR_REPO_TAG_NAME".Substring(1)  # trim leading "v"
 		Write-Diagnostic "Setting version based on tag to $CefVersion"
 	}
-
-	# Take the cef version and strip the commit hash
-	$CefPackageVersion = $CefVersion.SubString(0, $CefVersion.LastIndexOf('.'))
+	
+	if($CefVersion.StartsWith('3.'))
+	{
+		# Take the cef version and strip the commit hash
+		$CefPackageVersion = $CefVersion.SubString(0, $CefVersion.LastIndexOf('.'))
+	}
+	else
+	{
+		# Take the cef version and strip the commit hash, chromium version 
+		# we should end up with something like 73.1.12
+		$CefPackageVersion = $CefVersion.SubString(0, $CefVersion.IndexOf('+'))
+	}
+	
+	if($Suffix)
+	{
+		$CefPackageVersion = $CefPackageVersion + '-' + $Suffix
+	}
 
 	# https://github.com/jbake/Powershell_scripts/blob/master/Invoke-BatchFile.ps1
 	function Invoke-BatchFile
@@ -180,28 +198,32 @@ try
 		md 'cef\win32\debug\VS2013' | Out-Null
 		md 'cef\win32\debug\VS2015' | Out-Null
 		md 'cef\win32\debug\VS2017' | Out-Null
+		md 'cef\win32\debug\VS2019' | Out-Null
 		md 'cef\win32\release' | Out-Null
 		md 'cef\win32\release\VS2012' | Out-Null
 		md 'cef\win32\release\VS2013' | Out-Null
 		md 'cef\win32\release\VS2015' | Out-Null
 		md 'cef\win32\release\VS2017' | Out-Null
+		md 'cef\win32\release\VS2019' | Out-Null
 		md 'cef\x64' | Out-Null
 		md 'cef\x64\debug' | Out-Null
 		md 'cef\x64\debug\VS2012' | Out-Null
 		md 'cef\x64\debug\VS2013' | Out-Null
 		md 'cef\x64\debug\VS2015' | Out-Null
 		md 'cef\x64\debug\VS2017' | Out-Null
+		md 'cef\x64\debug\VS2019' | Out-Null
 		md 'cef\x64\release' | Out-Null
 		md 'cef\x64\release\VS2012' | Out-Null
 		md 'cef\x64\release\VS2013' | Out-Null
 		md 'cef\x64\release\VS2015' | Out-Null
 		md 'cef\x64\release\VS2017' | Out-Null
+		md 'cef\x64\release\VS2019' | Out-Null
 	}
 
 	function Msvs
 	{
 		param(
-			[ValidateSet('v110', 'v120', 'v140', 'v141')]
+			[ValidateSet('v110', 'v120', 'v140', 'v141', 'v142')]
 			[Parameter(Position = 0, ValueFromPipeline = $true)]
 			[string] $Toolchain,
 
@@ -224,28 +246,49 @@ try
 		{
 			'v110'
 			{
+				if($env:VS110COMNTOOLS -eq $null)
+				{
+					Die "Visual Studio 2012 was not found"
+				}
 				$VisualStudioVersion = '11.0'
 				$VXXCommonTools = Join-Path $env:VS110COMNTOOLS '..\..\vc'
 				$CmakeGenerator = 'Visual Studio 11'
 			}
 			'v120'
 			{
+				if($env:VS120COMNTOOLS -eq $null)
+				{
+					Die "Visual Studio 2013 was not found"
+				}
 				$VisualStudioVersion = '12.0'
 				$VXXCommonTools = Join-Path $env:VS120COMNTOOLS '..\..\vc'
 				$CmakeGenerator = 'Visual Studio 12'
 			}
 			'v140'
 			{
+				if($env:VS140COMNTOOLS -eq $null)
+				{
+					Die "Visual Studio 2015 was not found"
+				}
 				$VisualStudioVersion = '14.0'
 				$VXXCommonTools = Join-Path $env:VS140COMNTOOLS '..\..\vc'
 				$CmakeGenerator = 'Visual Studio 14'
 			}
-			'v141'
+			{($_ -eq 'v141') -or ($_ -eq 'v142')}
 			{
+				$VS_VER = 15;
+				$VS_OFFICIAL_VER = 2017;
+				
+				if ($_ -eq 'v142')
+				{
+					$VS_VER=16;
+					$VS_OFFICIAL_VER=2019;
+				}
+				
 				$programFilesDir = (${env:ProgramFiles(x86)}, ${env:ProgramFiles} -ne $null)[0]
 
 				$vswherePath = Join-Path $programFilesDir 'Microsoft Visual Studio\Installer\vswhere.exe'
-				#Check if we already have vswhere which is included in newer versions of VS2017
+				#Check if we already have vswhere which is included in newer versions of VS2017/VS2019
 				if(-not (Test-Path $vswherePath))
 				{
 					Write-Diagnostic "Downloading VSWhere as no install found at $vswherePath"
@@ -257,24 +300,25 @@ try
 					if(-not (Test-Path $vswherePath))
 					{
 						$client = New-Object System.Net.WebClient;
-						$client.DownloadFile('https://github.com/Microsoft/vswhere/releases/download/2.2.11/vswhere.exe', $vswherePath);
+						$client.DownloadFile('https://github.com/Microsoft/vswhere/releases/download/2.5.2/vswhere.exe', $vswherePath);
 					}
 				}
 			
 				Write-Diagnostic "VSWhere path $vswherePath"
+
+				$versionSearchStr = "[$VS_VER.0," + ($VS_VER+1) + ".0)"
+				$VS2017InstallPath = & $vswherePath -version $versionSearchStr -property installationPath
 			
-				$VS2017InstallPath = & $vswherePath -version 15 -property installationPath
-			
-				Write-Diagnostic "VS2017InstallPath: $VS2017InstallPath"
+				Write-Diagnostic "$($VS_OFFICIAL_VER)InstallPath: $VS2017InstallPath"
 				
-				if(-not (Test-Path $VS2017InstallPath))
+				if($VS2017InstallPath -eq $null -or !(Test-Path $VS2017InstallPath))
 				{
-					Die "Visual Studio 2017 was not found"
+					Die "Visual Studio $VS_OFFICIAL_VER was not found"
 				}
 				
-				$VisualStudioVersion = '15.0'
+				$VisualStudioVersion = "$VS_VER.0"
 				$VXXCommonTools = Join-Path $VS2017InstallPath VC\Auxiliary\Build
-				$CmakeGenerator = 'Visual Studio 15'
+				$CmakeGenerator = "Visual Studio $VS_VER"
 			}
 		}
 
@@ -287,7 +331,6 @@ try
 		$CefDir = TernaryReturn ($Platform -eq 'x86') $Cef32 $Cef64
 
 		$Arch = TernaryReturn ($Platform -eq 'x64') 'x64' 'win32'
-		$CmakeArch = TernaryReturn ($Platform -eq 'x64') ' Win64' ''
 
 		$VCVarsAll = Join-Path $VXXCommonTools vcvarsall.bat
 		if (-not (Test-Path $VCVarsAll))
@@ -306,11 +349,19 @@ try
 		if ($env:CEFSHARP_BUILD_IS_BOOTSTRAPPED -ne "$Toolchain$Platform")
 		{
 			Invoke-BatchFile $VCVarsAll $Platform
+			Write-Diagnostic "pushd $CefDir"
 			pushd $CefDir
 			# Remove previously generated CMake data for the different platform/toolchain
 			rm CMakeCache.txt -ErrorAction:SilentlyContinue
 			rm -r CMakeFiles -ErrorAction:SilentlyContinue
-			cmake -G "$CmakeGenerator$CmakeArch" -DUSE_SANDBOX=Off -DCEF_RUNTIME_LIBRARY_FLAG=/MD
+			$cmake_path = "cmake.exe";
+			if ($env:ChocolateyInstall -And (Test-Path ($env:ChocolateyInstall + "\bin\" + $cmake_path)))
+			{
+				$cmake_path = $env:ChocolateyInstall + "\bin\" + $cmake_path;			
+			}
+			&"$cmake_path" --version
+			Write-Diagnostic "Running cmake: $cmake_path -LAH -G '$CmakeGenerator' -A $Arch -DUSE_SANDBOX=Off -DCEF_RUNTIME_LIBRARY_FLAG=/MD ."
+			&"$cmake_path" -LAH -G "$CmakeGenerator" -A $Arch -DUSE_SANDBOX=Off -DCEF_RUNTIME_LIBRARY_FLAG=/MD .
 			popd
 			$env:CEFSHARP_BUILD_IS_BOOTSTRAPPED = "$Toolchain$Platform"
 		}
@@ -364,7 +415,7 @@ try
 	function VSX
 	{
 		param(
-			[ValidateSet('v110', 'v120', 'v140', 'v141')]
+			[ValidateSet('v110', 'v120', 'v140', 'v141', 'v142')]
 			[Parameter(Position = 0, ValueFromPipeline = $true)]
 			[string] $Toolchain
 		)
@@ -388,7 +439,7 @@ try
 	function CreateCefSdk
 	{
 		param(
-			[ValidateSet('v110', 'v120', 'v140', 'v141')]
+			[ValidateSet('v110', 'v120', 'v140', 'v141', 'v142')]
 			[Parameter(Position = 0, ValueFromPipeline = $true)]
 			[string] $Toolchain,
 
@@ -404,7 +455,11 @@ try
 		Write-Diagnostic "Creating sdk for $Toolchain"
 
 		$VisualStudioVersion = $null
-		if($Toolchain -eq "v141")
+		if($Toolchain -eq "v142")
+		{
+			$VisualStudioVersion = "VS2019"
+		}
+		elseif($Toolchain -eq "v141")
 		{
 			$VisualStudioVersion = "VS2017"
 		}
@@ -443,9 +498,11 @@ try
 
 		# Build 32bit packages
 		. $Nuget pack nuget\cef.redist.nuspec -NoPackageAnalysis -Version $CefPackageVersion -Properties 'Configuration=Release;Platform=x86;CPlatform=windows32;' -OutputDirectory nuget
+		. $Nuget pack nuget\chromiumembeddedframework.redist.win.nuspec -NoPackageAnalysis -Version $CefPackageVersion -Properties 'Configuration=Release;Platform=x86;CPlatform=windows32;' -OutputDirectory nuget
 
 		# Build 64bit packages
 		. $Nuget pack nuget\cef.redist.nuspec -NoPackageAnalysis -Version $CefPackageVersion -Properties 'Configuration=Release;Platform=x64;CPlatform=windows64;' -OutputDirectory nuget
+		. $Nuget pack nuget\chromiumembeddedframework.redist.win.nuspec -NoPackageAnalysis -Version $CefPackageVersion -Properties 'Configuration=Release;Platform=x64;CPlatform=windows64;' -OutputDirectory nuget
 
 		# Build sdk
 		$Filename = Resolve-Path ".\nuget\cef.sdk.props"
@@ -458,6 +515,8 @@ try
 		{
 			appveyor PushArtifact "nuget\cef.redist.x86.$CefPackageVersion.nupkg"
 			appveyor PushArtifact "nuget\cef.redist.x64.$CefPackageVersion.nupkg"
+			appveyor PushArtifact "nuget\chromiumembeddedframework.redist.win-x86.$CefPackageVersion.nupkg"
+			appveyor PushArtifact "nuget\chromiumembeddedframework.redist.win-x64.$CefPackageVersion.nupkg"
 			appveyor PushArtifact "nuget\cef.sdk.$CefPackageVersion.nupkg"
 		}
 	}
@@ -474,7 +533,7 @@ try
 			}
 			
 			$Client = New-Object System.Net.WebClient;
-			$Client.DownloadFile('http://nuget.org/nuget.exe', $Nuget);
+			$Client.DownloadFile('https://dist.nuget.org/win-x86-commandline/v5.4.0/nuget.exe', $Nuget);
 		}
 	}
 
@@ -509,7 +568,7 @@ try
 		if (-not (Test-Path $LocalFile))
 		{
 			Write-Diagnostic "Downloading $Cef32FileName; this will take a while as the file is $Cef32FileSize MB."
-			$Client.DownloadFile($CefBuildServerUrl + $Cef32FileName, $LocalFile);
+			$Client.DownloadFile($CefBuildServerUrl + [System.Web.HttpUtility]::UrlEncode($Cef32FileName), $LocalFile);
 			
 			$Cef32LocalFileHash = (Get-FileHash -Path $LocalFile -Algorithm SHA1).Hash
 			
@@ -548,7 +607,7 @@ try
 		if (-not (Test-Path $LocalFile))
 		{
 			Write-Diagnostic "Downloading $Cef64FileName; this will take a while as the file is $Cef64FileSize MB."
-			$Client.DownloadFile($CefBuildServerUrl + $Cef64FileName, $LocalFile);
+			$Client.DownloadFile($CefBuildServerUrl + [System.Web.HttpUtility]::UrlEncode($Cef64FileName), $LocalFile);
 			
 			$Cef64LocalFileHash = (Get-FileHash -Path $LocalFile -Algorithm SHA1).Hash
 			
@@ -734,6 +793,10 @@ try
 		"vs2017"
 		{
 			VSX v141
+		}
+		"vs2019"
+		{
+			VSX v142
 		}
 	}
 }
